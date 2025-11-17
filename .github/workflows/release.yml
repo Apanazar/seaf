@@ -115,13 +115,13 @@ jobs:
         GOARCH: ${{ matrix.arch }}
         CGO_ENABLED: 1
       run: |
-        if [ "${{ matrix.goos }}" == "windows" ]; then
+        if ("${{ matrix.goos }}" -eq "windows") {
           echo "Building Windows GUI application..."
           go build -ldflags="-H windowsgui" -o ${{ matrix.binary_name }} .
-        else
+        } else {
           echo "Building ${{ matrix.goos }} application..."
           go build -o ${{ matrix.binary_name }} .
-        fi
+        }
 
     - name: Upload binary
       uses: actions/upload-artifact@v4
