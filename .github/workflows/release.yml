@@ -1,13 +1,33 @@
-name: Create Release
+name: Create Releases 
 
 on:
   push:
     tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:    
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+  build:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
     
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            arch: amd64
+            binary_name: seaf-linux
+          - os: windows-latest
+            goos: windows
+            arch: amd64
+            binary_name: seaf-windows.exe
+          - os: macos-latest
+            goos: darwin
+            arch: amd64
+            binary_name: seaf-macos
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
@@ -16,24 +36,47 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.24.x'
+        cache: true
 
-    - name: Install Linux dependencies
+    - name: Install Linux dependencies (Fyne/GLFW)
+      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev xorg-dev libglvnd-dev
 
-    - name: Build for multiple platforms
-      run: |
-        GOOS=linux GOARCH=amd64 go build -o seaf-linux .
-        GOOS=windows GOARCH=amd64 go build -o seaf-windows.exe .
-        GOOS=darwin GOARCH=amd64 go build -o seaf-macos .
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          seaf-linux
-          seaf-windows.exe
-          seaf-macos
+    - name: Build binary
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.arch }}
+        CGO_ENABLED: 1
+      run: |
+        go build -o ${{ matrix.binary_name }} .
+
+    - name: Upload binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.binary_name }}
+        path: ${{ matrix.binary_name }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: build 
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts/
+          
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./artifacts/seaf-linux
+            ./artifacts/seaf-windows.exe
+            ./artifacts/seaf-macos
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
