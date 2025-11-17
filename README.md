@@ -51,11 +51,12 @@ cd seaf
 ```
 
 ## For Unix Systems (Linux/macOS):
-`GOOS=linux GOARCH=amd64 go build`
+`GOOS=linux GOARCH=amd64 go build -o seaf-linux`
+`GOOS=darwin GOARCH=amd64 go build -o seaf-macos-amd64`
+`GOOS=darwin GOARCH=arm64 go build -o seaf-macos-arm64`
 
 ## For Windows Systems:
-
-`GOOS=windows GOARCH=amd64 go build`
+`GOOS=windows GOARCH=amd64 go build -o seaf-windows.exe`
 
 ## Usage
 
@@ -84,12 +85,6 @@ cd seaf
 1. AES-GCM Encryption: Utilizes a strong encryption standard ensuring data confidentiality and integrity.
 2. Unique Archive Format: Custom .seaf format reduces susceptibility to vulnerabilities associated with common archive formats.
 3. Salt Usage: Incorporates cryptographic salts to prevent rainbow table attacks and enhance password security.
-4. Interactive Security Challenge: Requires users to pass a game challenge before extraction, adding a behavioral security layer.
-
-## Acknowledgements
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) for the interactive game interface.
-- [uiprogress](https://github.com/gosuri/uiprogress) for the progress bar implementation.
 
 ## Contact
-
 For any inquiries or support, please contact abanazar@inbox.ru

@@ -3,26 +3,27 @@ package archiver
 import (
 	"bytes"
 	"compress/flate"
+	"fmt"
 	"io"
 )
 
-// Compress compresses data using the DEFLATE algorithm
-func Compress(data []byte) ([]byte, error) {
+func Compress(data []byte, level int) ([]byte, error) {
+	if level < 0 || level > 9 {
+		return nil, fmt.Errorf("invalid compression level: %d, must be between 0 and 9", level)
+	}
+
 	var buf bytes.Buffer
-	// Creating a new flat.Writer with compression level 5 (default)
-	writer, err := flate.NewWriter(&buf, flate.DefaultCompression)
+	writer, err := flate.NewWriter(&buf, level)
 	if err != nil {
 		return nil, err
 	}
 
-	//Writing data to flate.Writer
 	_, err = writer.Write(data)
 	if err != nil {
 		writer.Close()
 		return nil, err
 	}
 
-	// Closing the writer to write down all the remaining data
 	if err := writer.Close(); err != nil {
 		return nil, err
 	}
@@ -30,7 +31,6 @@ func Compress(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Decompress decompresses data using the DEFLATE algorithm
 func Decompress(data []byte) ([]byte, error) {
 	reader := flate.NewReader(bytes.NewReader(data))
 	defer reader.Close()

@@ -6,26 +6,36 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
+	"path/filepath"
 
 	"seaf/archiver"
 	"seaf/ui"
 )
 
 var (
-	password     string
-	saltHex      string
-	outputFile   string
-	extract      bool
-	archiveFile  string
-	generateSalt bool
-	saltLength   int
+	password      string
+	saltHex       string
+	outputFile    string
+	extract       bool
+	archiveFile   string
+	generateSalt  bool
+	saltLength    int
+	compressLevel int
 )
 
 func main() {
+	if len(os.Args) == 1 {
+		runGUI()
+	} else {
+		runTUI()
+	}
+}
+
+func runTUI() {
 	flag.Parse()
 
-	// Checking and generating salt if the --generate-salt flag is set
 	if generateSalt {
 		var err error
 		saltHex, err = generateRandomSalt(saltLength)
@@ -42,14 +52,13 @@ func main() {
 	}
 
 	if extract {
-		// Extract files from the archive with 3 attempts to complete the game
-		err := extractArchiveWithGame(password, saltHex, archiveFile)
+		err := archiver.ExtractArchive(password, saltHex, archiveFile)
 		if err != nil {
 			log.Fatalf("Error extracting the archive: %v", err)
 		}
+
 		fmt.Println("The extraction was completed successfully!")
 	} else {
-		// File Archiving
 		inputFiles := flag.Args()
 		if len(inputFiles) == 0 {
 			fmt.Println("No input files are specified.")
@@ -57,27 +66,120 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Collecting information about files
 		files, err := archiver.CollectFiles(inputFiles)
 		if err != nil {
 			log.Fatalf("Error when collecting files: %v", err)
 		}
 
-		// Initializing the UI
-		progressUI := ui.NewProgressUI(len(files))
+		totalOriginalSize := int64(0)
+		totalCompressedSize := int64(0)
+		totalEncryptedSize := int64(0)
 
-		// Starting archiving and encryption
-		err = archiver.CreateArchive(password, saltHex, outputFile, files, progressUI)
+		salt, err := hex.DecodeString(saltHex)
+		if err != nil {
+			log.Fatalf("Error decoding salt: %v", err)
+		}
+
+		key, err := archiver.GenerateKey(password, salt)
+		if err != nil {
+			log.Fatalf("Error generating key: %v", err)
+		}
+
+		for _, file := range files {
+			data, err := os.ReadFile(file.Path)
+			if err != nil {
+				log.Fatalf("Error reading file %s: %v", file.Path, err)
+			}
+
+			compressedData, err := archiver.Compress(data, compressLevel)
+			if err != nil {
+				log.Fatalf("Error compressing file %s: %v", file.Path, err)
+			}
+
+			encryptedData, err := archiver.Encrypt(compressedData, key)
+			if err != nil {
+				log.Fatalf("Error encrypting file %s: %v", file.Path, err)
+			}
+
+			fmt.Printf("\n--- Processing: %s ---\n", file.Path)
+			fmt.Printf("Original size: %d bytes (%.2f MB)\n", len(data), float64(len(data))/(1024*1024))
+
+			entropy := calculateEntropy(data)
+			fmt.Printf("Data entropy: %.4f (0-1, the higher it is, the worse it shrinks)\n", entropy)
+
+			compressionRatio := float64(len(compressedData)) / float64(len(data)) * 100
+			fmt.Printf("After compression: %d bytes, Ratio: %.2f%%\n", len(compressedData), compressionRatio)
+			fmt.Printf("After encryption: %d bytes\n", len(encryptedData))
+			fmt.Printf("Total overhead: %+d bytes\n", len(encryptedData)-len(data))
+
+			totalOriginalSize += int64(len(data))
+			totalCompressedSize += int64(len(compressedData))
+			totalEncryptedSize += int64(len(encryptedData))
+		}
+
+		fmt.Printf("\n=== FINAL RESULTS ===\n")
+		fmt.Printf("Original total: %d bytes (%.2f MB)\n", totalOriginalSize, float64(totalOriginalSize)/(1024*1024))
+		fmt.Printf("Compressed total: %d bytes (%.2f MB)\n", totalCompressedSize, float64(totalCompressedSize)/(1024*1024))
+		fmt.Printf("Encrypted total: %d bytes (%.2f MB)\n", totalEncryptedSize, float64(totalEncryptedSize)/(1024*1024))
+		fmt.Printf("Final compression: %.2f%%\n", float64(totalCompressedSize)/float64(totalOriginalSize)*100)
+		fmt.Printf("Archive overhead: %.2f%%\n", float64(totalEncryptedSize-totalOriginalSize)/float64(totalOriginalSize)*100)
+
+		if err := createOutputDir(); err != nil {
+			log.Fatalf("Error creating output directory: %v", err)
+		}
+
+		fullOutputPath := filepath.Join("output", outputFile)
+
+		err = archiver.CreateArchive(password, saltHex, fullOutputPath, files, compressLevel)
 		if err != nil {
 			log.Fatalf("Error creating the archive: %v", err)
 		}
 
-		progressUI.Finish()
+		fmt.Printf("Archive successfully created: %s\n", fullOutputPath)
 		fmt.Println("Archiving and encryption have been completed successfully.")
 	}
 }
 
-// Defining command line flags
+func createOutputDir() error {
+	if _, err := os.Stat("output"); os.IsNotExist(err) {
+		fmt.Println("Creating output directory...")
+		err := os.Mkdir("output", 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create output directory: %v", err)
+		}
+		fmt.Println("Output directory created successfully")
+	} else if err != nil {
+		return fmt.Errorf("error checking output directory: %v", err)
+	}
+	return nil
+}
+
+func runGUI() {
+	gui := ui.NewGUI()
+	gui.ShowAndRun()
+}
+
+func calculateEntropy(data []byte) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+
+	var freq [256]int
+	for _, b := range data {
+		freq[b]++
+	}
+
+	var entropy float64
+	for _, count := range freq {
+		if count > 0 {
+			p := float64(count) / float64(len(data))
+			entropy -= p * math.Log2(p)
+		}
+	}
+
+	return entropy / 8.0
+}
+
 func init() {
 	flag.StringVar(&password, "password", "", "Password for encryption/decryption")
 	flag.StringVar(&saltHex, "salt", "", "Salt (in hexadecimal format)")
@@ -86,6 +188,7 @@ func init() {
 	flag.StringVar(&archiveFile, "archive", "archive.seaf", "The name of the archive to extract")
 	flag.BoolVar(&generateSalt, "generate-salt", false, "Generate a random salt")
 	flag.IntVar(&saltLength, "salt-length", 16, "Length of the generated salt in bytes")
+	flag.IntVar(&compressLevel, "compress", 6, "Compression level (0-9, where 0=no compression, 1=fastest, 9=best compression)")
 
 	asciiArt := `
               _____                    _____                    _____                    _____          
@@ -117,22 +220,29 @@ func init() {
 		fmt.Println(asciiArt)
 		fmt.Println("Secure Archiver is a tool for encrypting and archiving files.")
 		fmt.Println()
+		fmt.Println("Run without arguments to launch GUI interface")
+		fmt.Println("Or use command line flags for terminal usage:")
+		fmt.Println()
 		fmt.Println("Flags:")
 		flag.PrintDefaults()
 		fmt.Println()
 		fmt.Println("Examples:")
 		fmt.Println("  Archive files:")
 		fmt.Println("    ", "./seaf", "--password=... --salt=... --output=archive.seaf file1 file2")
+		fmt.Println("    Output: ./output/archive.seaf")
 		fmt.Println()
 		fmt.Println("  Generate salt and archive files:")
 		fmt.Println("    ", "./seaf", "--password=... --generate-salt --salt-length=16 --output=archive.seaf file1 file2")
+		fmt.Println("    Output: ./output/archive.seaf")
 		fmt.Println()
 		fmt.Println("  Extract files:")
 		fmt.Println("    ", "./seaf", "--password=... --salt=... --extract --archive=archive.seaf")
+		fmt.Println()
+		fmt.Println("  Launch GUI:")
+		fmt.Println("    ", "./seaf")
 	}
 }
 
-// generateRandomSalt generates a random salt of a given length
 func generateRandomSalt(length int) (string, error) {
 	if length <= 0 {
 		return "", fmt.Errorf("invalid salt length: %d", length)
@@ -143,33 +253,4 @@ func generateRandomSalt(length int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(salt), nil
-}
-
-// extractArchiveWithGame performs archive extraction after successful completion of the game
-func extractArchiveWithGame(password, saltHex, archiveFile string) error {
-	maxAttempts := 3
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		fmt.Printf("Attempt %d from %d: Complete the game to extract the archive.\n", attempt, maxAttempts)
-		result := ui.RunGame()
-		if result.Success {
-			fmt.Println(result.Message)
-			// Starting extraction
-			err := archiver.ExtractArchive(password, saltHex, archiveFile)
-			if err != nil {
-				return err
-			}
-			return nil
-		} else {
-			fmt.Println("Try to turn off the computer, you won't escape anyway!")
-		}
-	}
-
-	// If all attempts are unsuccessful, delete the archive
-	fmt.Println("All attempts are unsuccessful. The archive will be deleted.")
-	err := os.Remove(archiveFile)
-	if err != nil {
-		return fmt.Errorf("the archive could not be deleted: %v", err)
-	}
-
-	return fmt.Errorf("extraction failed after %d attempts", maxAttempts)
 }
