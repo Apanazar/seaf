@@ -1,16 +1,81 @@
-name: Create Releases 
+name: Create Releases
 
 on:
   push:
-    tags: [ "v*" ]
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:    
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+permissions:
+  contents: write
 
 jobs:
+  version:
+    name: Calculate Version
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.version.outputs.new_tag }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Get latest tag
+      id: tags
+      run: |
+        latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+    - name: Calculate new version
+      id: version
+      run: |
+        latest_tag="${{ steps.tags.outputs.latest_tag }}"
+        echo "Latest tag: $latest_tag"
+        
+        # Remove 'v' prefix and split version
+        version="${latest_tag#v}"
+        IFS='.' read -r major minor patch <<< "$version"
+        
+        if [ "${{ github.event.inputs.version_type }}" == "major" ]; then
+          major=$((major + 1))
+          minor=0
+          patch=0
+        elif [ "${{ github.event.inputs.version_type }}" == "minor" ]; then
+          minor=$((minor + 1))
+          patch=0
+        else
+          patch=$((patch + 1))
+        fi
+        
+        new_tag="v${major}.${minor}.${patch}"
+        echo "New tag: $new_tag"
+        echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
+
+    - name: Create new tag
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git tag ${{ steps.version.outputs.new_tag }}
+        git push origin ${{ steps.version.outputs.new_tag }}
+
   build:
     name: Build for ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
+    needs: version
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     
     strategy:
       matrix:
@@ -60,8 +125,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: build 
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build]
     runs-on: ubuntu-latest
     
     steps:
@@ -69,14 +133,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts/
-          
-      - name: Create GitHub Release and Upload Assets
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             ./artifacts/seaf-linux
             ./artifacts/seaf-windows.exe
             ./artifacts/seaf-macos
+          tag_name: ${{ needs.version.outputs.new_tag }}
+          name: Release ${{ needs.version.outputs.new_tag }}
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
