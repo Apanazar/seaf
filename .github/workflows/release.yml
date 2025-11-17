@@ -1,0 +1,39 @@
+name: Create Release
+
+on:
+  push:
+    tags: [ "v*" ]
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.x'
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev xorg-dev libglvnd-dev
+
+    - name: Build for multiple platforms
+      run: |
+        GOOS=linux GOARCH=amd64 go build -o seaf-linux .
+        GOOS=windows GOARCH=amd64 go build -o seaf-windows.exe .
+        GOOS=darwin GOARCH=amd64 go build -o seaf-macos .
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          seaf-linux
+          seaf-windows.exe
+          seaf-macos
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
