@@ -167,10 +167,17 @@ func (g *GUI) createArchiveTab() *container.Scroll {
 		},
 	)
 
+	filesScroll := container.NewScroll(g.filesList)
+	filesScroll.SetMinSize(fyne.NewSize(0, 100))
+
 	selectFilesBtn := widget.NewButton("Select Files", g.selectFiles)
 	clearFilesBtn := widget.NewButton("Clear All", g.clearFiles)
 
 	fileButtons := container.NewHBox(selectFilesBtn, clearFilesBtn)
+
+	filesContainer := container.NewBorder(
+		nil, fileButtons, nil, nil, filesScroll,
+	)
 
 	g.outputEntry = widget.NewEntry()
 	g.outputEntry.SetText("archive.seaf")
@@ -184,9 +191,7 @@ func (g *GUI) createArchiveTab() *container.Scroll {
 			{Text: "Password", Widget: g.passwordEntry},
 			{Text: "Salt", Widget: saltContainer},
 			{Text: "Compression Level", Widget: g.compressionLevelSelect},
-			{Text: "Files", Widget: container.NewBorder(
-				nil, fileButtons, nil, nil, g.filesList,
-			)},
+			{Text: "Files", Widget: filesContainer},
 			{Text: "Output File", Widget: g.outputEntry},
 		},
 	}
