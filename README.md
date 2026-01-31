@@ -51,12 +51,12 @@ cd seaf
 ```
 
 ## For Unix Systems (Linux/macOS):
-`GOOS=linux GOARCH=amd64 go build -o seaf-linux`  
-`GOOS=darwin GOARCH=amd64 go build -o seaf-macos-amd64`  
-`GOOS=darwin GOARCH=arm64 go build -o seaf-macos-arm64`  
+`GOOS=linux  GOARCH=amd64 go build --ldflags="-s -w" -o seaf-linux`  
+`GOOS=darwin GOARCH=amd64 go build --ldflags="-s -w" -o seaf-macos-amd64`  
+`GOOS=darwin GOARCH=arm64 go build --ldflags="-s -w" -o seaf-macos-arm64`  
 
 ## For Windows Systems:
-`GOOS=windows GOARCH=amd64 go build -o seaf-windows.exe`
+`GOOS=windows GOARCH=amd64 go build --ldflags="-s -w -H windowsgui" -o seaf-windows.exe`
 
 ## Usage
 

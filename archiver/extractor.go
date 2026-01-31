@@ -9,9 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
-func ExtractArchive(password, saltHex, archiveFile string) error {
+func ExtractArchive(password, saltHex, archiveFile, outputDir string) error {
 	salt, err := hex.DecodeString(saltHex)
 	if err != nil {
 		return err
@@ -31,6 +32,10 @@ func ExtractArchive(password, saltHex, archiveFile string) error {
 	totalFiles, err := ReadHeader(inFile)
 	if err != nil {
 		return err
+	}
+
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %v", err)
 	}
 
 	for i := uint32(0); i < totalFiles; i++ {
@@ -76,9 +81,14 @@ func ExtractArchive(password, saltHex, archiveFile string) error {
 		default:
 			return fmt.Errorf("unknown compression method: %d", compressionMethod)
 		}
+		outputPath := filepath.Join(outputDir, filename)
 
-		if err := os.WriteFile(filename, originalData, 0644); err != nil {
-			return err
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %v", filename, err)
+		}
+
+		if err := os.WriteFile(outputPath, originalData, 0644); err != nil {
+			return fmt.Errorf("failed to write file %s: %v", outputPath, err)
 		}
 	}
 

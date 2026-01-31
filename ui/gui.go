@@ -2,6 +2,7 @@ package ui
 
 import (
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -13,10 +14,16 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"seaf/archiver"
 )
+
+//go:embed logo.png
+var appIconData []byte
+var appIconResource fyne.Resource
 
 type GUI struct {
 	app                    fyne.App
@@ -40,6 +47,9 @@ type GUI struct {
 	resultsContainer       *fyne.Container
 	closeResultsBtn        *widget.Button
 	compressionLevelSelect *widget.Select
+	saveFolderLabel        *widget.Label
+	selectedSaveFolder     string
+	outputDir              string
 }
 
 type Statistics struct {
@@ -74,6 +84,19 @@ func NewGUI() *GUI {
 }
 
 func (g *GUI) createUI() {
+	if len(appIconData) == 0 {
+		g.window.SetIcon(theme.FyneLogo())
+		g.app.SetIcon(theme.FyneLogo())
+		return
+	}
+
+	if appIconResource == nil {
+		appIconResource = fyne.NewStaticResource("ui/logo.png", appIconData)
+	}
+
+	g.window.SetIcon(appIconResource)
+	g.app.SetIcon(appIconResource)
+
 	createTab := g.createArchiveTab()
 	extractTab := g.createExtractTab()
 
@@ -129,6 +152,10 @@ func (g *GUI) createUI() {
 	g.window.SetContent(mainContent)
 }
 
+func (g *GUI) copyToClipboard(text string) {
+	g.window.Clipboard().SetContent(text)
+}
+
 func (g *GUI) createArchiveTab() *container.Scroll {
 	g.passwordEntry = widget.NewPasswordEntry()
 	g.passwordEntry.SetPlaceHolder("Enter encryption password")
@@ -138,8 +165,17 @@ func (g *GUI) createArchiveTab() *container.Scroll {
 
 	g.generateSaltBtn = widget.NewButton("Generate Salt", g.generateSalt)
 
+	saltCopyBtn := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+		if g.saltEntry.Text != "" {
+			g.copyToClipboard(g.saltEntry.Text)
+		}
+	})
+	saltCopyBtn.Importance = widget.LowImportance
+
 	saltContainer := container.NewBorder(
-		nil, nil, nil, g.generateSaltBtn, g.saltEntry,
+		nil, nil, nil,
+		container.NewHBox(g.generateSaltBtn, saltCopyBtn),
+		g.saltEntry,
 	)
 
 	compressionLevels := []string{
@@ -171,12 +207,32 @@ func (g *GUI) createArchiveTab() *container.Scroll {
 	filesScroll.SetMinSize(fyne.NewSize(0, 100))
 
 	selectFilesBtn := widget.NewButton("Select Files", g.selectFiles)
+	selectFolderBtn := widget.NewButton("Select Folder", g.selectFolder)
 	clearFilesBtn := widget.NewButton("Clear All", g.clearFiles)
 
-	fileButtons := container.NewHBox(selectFilesBtn, clearFilesBtn)
+	fileButtons := container.NewHBox(selectFilesBtn, selectFolderBtn, clearFilesBtn)
 
 	filesContainer := container.NewBorder(
 		nil, fileButtons, nil, nil, filesScroll,
+	)
+
+	g.saveFolderLabel = widget.NewLabel("Not selected (default: app storage)")
+	g.saveFolderLabel.Wrapping = fyne.TextWrapWord
+
+	selectFolderBtn = widget.NewButton("Select Save Folder", g.selectSaveFolder)
+
+	clearFolderBtn := widget.NewButton("Clear", func() {
+		g.selectedSaveFolder = ""
+		g.saveFolderLabel.SetText("Not selected (default: app storage)")
+	})
+	clearFolderBtn.Importance = widget.LowImportance
+
+	folderButtons := container.NewHBox(selectFolderBtn, clearFolderBtn)
+
+	folderContainer := container.NewVBox(
+		widget.NewLabel("Save location:"),
+		g.saveFolderLabel,
+		folderButtons,
 	)
 
 	g.outputEntry = widget.NewEntry()
@@ -192,6 +248,7 @@ func (g *GUI) createArchiveTab() *container.Scroll {
 			{Text: "Salt", Widget: saltContainer},
 			{Text: "Compression Level", Widget: g.compressionLevelSelect},
 			{Text: "Files", Widget: filesContainer},
+			{Text: "Save Location", Widget: folderContainer},
 			{Text: "Output File", Widget: g.outputEntry},
 		},
 	}
@@ -238,6 +295,21 @@ func (g *GUI) createExtractTab() *container.Scroll {
 	))
 }
 
+func (g *GUI) selectSaveFolder() {
+	dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		if uri == nil {
+			return
+		}
+
+		g.selectedSaveFolder = uri.Path()
+		g.saveFolderLabel.SetText(filepath.Base(g.selectedSaveFolder))
+	}, g.window)
+}
+
 func (g *GUI) generateSalt() {
 	salt, err := generateRandomSalt(16)
 	if err != nil {
@@ -272,6 +344,59 @@ func (g *GUI) selectFiles() {
 		g.selectedFiles = append(g.selectedFiles, filePath)
 		g.filesList.Refresh()
 		reader.Close()
+	}, g.window)
+}
+
+func (g *GUI) selectFolder() {
+	dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		if uri == nil {
+			return
+		}
+
+		err = filepath.Walk(uri.Path(), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !info.Mode().IsRegular() ||
+				strings.HasPrefix(info.Name(), ".") ||
+				info.Size() == 0 {
+				return nil
+			}
+
+			found := false
+			for _, existingFile := range g.selectedFiles {
+				if existingFile == path {
+					found = true
+					break
+				}
+			}
+			if !found {
+				g.selectedFiles = append(g.selectedFiles, path)
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+
+		g.filesList.Refresh()
+		g.clearResults()
+
+		if len(g.selectedFiles) == 0 {
+			dialog.ShowInformation("No Files Found",
+				"No regular files found in the selected folder.", g.window)
+		} else {
+			dialog.ShowInformation("Files Added",
+				fmt.Sprintf("Added %d files from folder.", len(g.selectedFiles)), g.window)
+		}
 	}, g.window)
 }
 
@@ -325,14 +450,27 @@ func (g *GUI) createArchive() {
 
 	go func() {
 		defer g.hideProgress()
-
 		compressLevel := g.getSelectedCompressionLevel()
 
-		if err := g.createOutputDir(); err != nil {
-			g.showError(fmt.Sprintf("Error creating output directory: %v", err))
-			return
+		var savePath string
+		if g.selectedSaveFolder != "" {
+			savePath = g.selectedSaveFolder
+		} else {
+			if err := g.createOutputDir(); err != nil {
+				g.showError(fmt.Sprintf("Error creating output directory: %v", err))
+				return
+			}
+			savePath = g.outputDir
 		}
-		fullOutputPath := filepath.Join("output", g.outputEntry.Text)
+
+		if _, err := os.Stat(savePath); os.IsNotExist(err) {
+			if err := os.MkdirAll(savePath, 0755); err != nil {
+				g.showError(fmt.Sprintf("Cannot create folder: %v", err))
+				return
+			}
+		}
+
+		fullOutputPath := filepath.Join(savePath, g.outputEntry.Text)
 
 		files, err := archiver.CollectFiles(g.selectedFiles)
 		if err != nil {
@@ -377,14 +515,16 @@ func (g *GUI) extractArchive() {
 	go func() {
 		defer g.hideProgress()
 
+		archiveDir := filepath.Dir(g.selectedArchive)
+
 		err := archiver.ExtractArchive(g.extractPasswordEntry.Text,
-			g.extractSaltEntry.Text, g.selectedArchive)
+			g.extractSaltEntry.Text, g.selectedArchive, archiveDir)
 		if err != nil {
 			g.showError(fmt.Sprintf("Error extracting archive: %v", err))
 			return
 		}
 
-		g.showSuccess("Archive extracted successfully!")
+		g.showSuccess(fmt.Sprintf("Archive extracted successfully to: %s", archiveDir))
 	}()
 }
 
@@ -500,14 +640,25 @@ func (g *GUI) clearResults() {
 }
 
 func (g *GUI) createOutputDir() error {
-	if _, err := os.Stat("output"); os.IsNotExist(err) {
-		err := os.Mkdir("output", 0755)
+	rootURI := g.app.Storage().RootURI()
+	if rootURI == nil {
+		return fmt.Errorf("cannot get app storage root")
+	}
+
+	outputURI, err := storage.Child(rootURI, "output")
+	if err != nil {
+		return fmt.Errorf("cannot create output URI: %v", err)
+	}
+
+	g.outputDir = outputURI.Path()
+
+	if _, err := os.Stat(g.outputDir); os.IsNotExist(err) {
+		err := os.MkdirAll(g.outputDir, 0755)
 		if err != nil {
 			return fmt.Errorf("failed to create output directory: %v", err)
 		}
-	} else if err != nil {
-		return fmt.Errorf("error checking output directory: %v", err)
 	}
+
 	return nil
 }
 

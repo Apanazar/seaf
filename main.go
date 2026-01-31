@@ -52,7 +52,8 @@ func runTUI() {
 	}
 
 	if extract {
-		err := archiver.ExtractArchive(password, saltHex, archiveFile)
+		archiveDir := filepath.Dir(archiveFile)
+		err := archiver.ExtractArchive(password, saltHex, archiveFile, archiveDir)
 		if err != nil {
 			log.Fatalf("Error extracting the archive: %v", err)
 		}
