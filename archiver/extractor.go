@@ -73,6 +73,8 @@ func ExtractArchive(password, saltHex, archiveFile, outputDir string) error {
 
 		var originalData []byte
 		switch compressionMethod {
+		case CompressionNone:
+			originalData = decryptedData
 		case CompressionDeflate:
 			originalData, err = Decompress(decryptedData)
 			if err != nil {

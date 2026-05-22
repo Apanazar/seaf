@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -50,6 +51,8 @@ type GUI struct {
 	saveFolderLabel        *widget.Label
 	selectedSaveFolder     string
 	outputDir              string
+	optimizeImagesCheck    *widget.Check
+	imageQualityEntry      *widget.Entry
 }
 
 type Statistics struct {
@@ -191,6 +194,16 @@ func (g *GUI) createArchiveTab() *container.Scroll {
 	g.compressionLevelSelect.SetSelected("6 - Default")
 	g.compressionLevelSelect.PlaceHolder = "Select compression level"
 
+	g.optimizeImagesCheck = widget.NewCheck("", func(checked bool) {
+		g.imageQualityEntry.Enable()
+	})
+	g.optimizeImagesCheck.SetChecked(false)
+
+	g.imageQualityEntry = widget.NewEntry()
+	g.imageQualityEntry.SetText("75")
+	g.imageQualityEntry.SetPlaceHolder("Quality (0-100)")
+	g.imageQualityEntry.Disable()
+
 	g.filesList = widget.NewList(
 		func() int {
 			return len(g.selectedFiles)
@@ -247,6 +260,8 @@ func (g *GUI) createArchiveTab() *container.Scroll {
 			{Text: "Password", Widget: g.passwordEntry},
 			{Text: "Salt", Widget: saltContainer},
 			{Text: "Compression Level", Widget: g.compressionLevelSelect},
+			{Text: "Image Optimization", Widget: g.optimizeImagesCheck},
+			{Text: "Image Quality", Widget: g.imageQualityEntry},
 			{Text: "Files", Widget: filesContainer},
 			{Text: "Save Location", Widget: folderContainer},
 			{Text: "Output File", Widget: g.outputEntry},
@@ -445,6 +460,17 @@ func (g *GUI) createArchive() {
 		return
 	}
 
+	optimize := g.optimizeImagesCheck.Checked
+	quality := 75.0
+	if optimize {
+		q, err := strconv.ParseFloat(g.imageQualityEntry.Text, 32)
+		if err == nil && q >= 0 && q <= 100 {
+			quality = q
+		} else {
+			dialog.ShowInformation("Invalid quality", "Using default 75", g.window)
+		}
+	}
+
 	g.showProgress("Creating archive...")
 	g.clearResults()
 
@@ -478,13 +504,13 @@ func (g *GUI) createArchive() {
 			return
 		}
 
-		stats, err := g.calculateStatistics(files, g.passwordEntry.Text, g.saltEntry.Text, compressLevel)
+		stats, err := g.calculateStatistics(files, g.passwordEntry.Text, g.saltEntry.Text, compressLevel, optimize, float32(quality))
 		if err != nil {
 			g.showError(fmt.Sprintf("Error calculating statistics: %v", err))
 			return
 		}
 
-		err = archiver.CreateArchive(g.passwordEntry.Text, g.saltEntry.Text, fullOutputPath, files, compressLevel)
+		err = archiver.CreateArchive(g.passwordEntry.Text, g.saltEntry.Text, fullOutputPath, files, compressLevel, optimize, float32(quality))
 		if err != nil {
 			g.showError(fmt.Sprintf("Error creating archive: %v", err))
 			return
@@ -541,7 +567,7 @@ func (g *GUI) getSelectedCompressionLevel() int {
 	return level
 }
 
-func (g *GUI) calculateStatistics(files []archiver.FileInfo, password, saltHex string, compressLevel int) (*Statistics, error) {
+func (g *GUI) calculateStatistics(files []archiver.FileInfo, password, saltHex string, compressLevel int, optimizeImages bool, imageQuality float32) (*Statistics, error) {
 	stats := &Statistics{
 		FileStats: make([]FileStat, 0, len(files)),
 	}
@@ -560,6 +586,13 @@ func (g *GUI) calculateStatistics(files []archiver.FileInfo, password, saltHex s
 		data, err := os.ReadFile(file.Path)
 		if err != nil {
 			return nil, err
+		}
+
+		if optimizeImages {
+			optData, changed, err := archiver.OptimizeImage(data, file.Path, imageQuality)
+			if err == nil && changed {
+				data = optData
+			}
 		}
 
 		compressedData, err := archiver.Compress(data, compressLevel)
@@ -603,6 +636,10 @@ func (g *GUI) showResults(stats *Statistics, outputPath string) {
 
 	compressionLevel := g.getSelectedCompressionLevel()
 	result.WriteString(fmt.Sprintf("Compression Level: %d\n\n", compressionLevel))
+
+	if g.optimizeImagesCheck.Checked {
+		result.WriteString("Image optimization: enabled\n\n")
+	}
 
 	for _, fileStat := range stats.FileStats {
 		result.WriteString(fmt.Sprintf("📁 %s\n", fileStat.Filename))
@@ -686,7 +723,7 @@ func (g *GUI) hideProgress() {
 
 func (g *GUI) showError(message string) {
 	fyne.Do(func() {
-		dialog.ShowError(fmt.Errorf(message), g.window)
+		dialog.ShowError(fmt.Errorf("%s", message), g.window)
 	})
 }
 

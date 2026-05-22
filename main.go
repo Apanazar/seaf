@@ -15,14 +15,16 @@ import (
 )
 
 var (
-	password      string
-	saltHex       string
-	outputFile    string
-	extract       bool
-	archiveFile   string
-	generateSalt  bool
-	saltLength    int
-	compressLevel int
+	password       string
+	saltHex        string
+	outputFile     string
+	extract        bool
+	archiveFile    string
+	generateSalt   bool
+	saltLength     int
+	compressLevel  int
+	optimizeImages bool
+	imageQuality   float64
 )
 
 func main() {
@@ -92,7 +94,15 @@ func runTUI() {
 				log.Fatalf("Error reading file %s: %v", file.Path, err)
 			}
 
-			compressedData, err := archiver.Compress(data, compressLevel)
+			if optimizeImages {
+				optData, changed, err := archiver.OptimizeImage(data, file.Path, float32(imageQuality))
+				if err == nil && changed {
+					fmt.Printf("Optimized %s: %d -> %d bytes\n", filepath.Base(file.Path), len(data), len(optData))
+					data = optData
+				}
+			}
+
+			compressedData, _, err := archiver.PrepareEntryData(data, compressLevel)
 			if err != nil {
 				log.Fatalf("Error compressing file %s: %v", file.Path, err)
 			}
@@ -131,7 +141,7 @@ func runTUI() {
 
 		fullOutputPath := filepath.Join("output", outputFile)
 
-		err = archiver.CreateArchive(password, saltHex, fullOutputPath, files, compressLevel)
+		err = archiver.CreateArchive(password, saltHex, fullOutputPath, files, compressLevel, optimizeImages, float32(imageQuality))
 		if err != nil {
 			log.Fatalf("Error creating the archive: %v", err)
 		}
@@ -190,6 +200,8 @@ func init() {
 	flag.BoolVar(&generateSalt, "generate-salt", false, "Generate a random salt")
 	flag.IntVar(&saltLength, "salt-length", 16, "Length of the generated salt in bytes")
 	flag.IntVar(&compressLevel, "compress", 6, "Compression level (0-9, where 0=no compression, 1=fastest, 9=best compression)")
+	flag.BoolVar(&optimizeImages, "optimize-images", false, "Optimize images by converting to a suitable format")
+	flag.Float64Var(&imageQuality, "quality", 75.0, "Image encoding quality (0-100)")
 
 	asciiArt := `
               _____                    _____                    _____                    _____          
@@ -235,6 +247,9 @@ func init() {
 		fmt.Println("  Generate salt and archive files:")
 		fmt.Println("    ", "./seaf", "--password=... --generate-salt --salt-length=16 --output=archive.seaf file1 file2")
 		fmt.Println("    Output: ./output/archive.seaf")
+		fmt.Println()
+		fmt.Println("  Archive with image optimization:")
+		fmt.Println("    ", "./seaf", "--password=... --salt=... --optimize-images --quality=80 --output=archive.seaf image.jpg")
 		fmt.Println()
 		fmt.Println("  Extract files:")
 		fmt.Println("    ", "./seaf", "--password=... --salt=... --extract --archive=archive.seaf")

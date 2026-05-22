@@ -11,6 +11,7 @@ const (
 	MagicNumber        = 0x53454146
 	Version            = 1
 	CompressionDeflate = 6
+	CompressionNone    = 0
 	// I will add other compression methods in the future
 )
 
